@@ -164,7 +164,7 @@ void M1000_Device::configure(uint64_t rate) {
 // encode output samples
 inline uint16_t M1000_Device::encode_out(int chan) {
 	int v = 0;
-	if (m_mode[chan] == SVMI) || (m_mode[chan] == DISABLED) {
+	if ( (m_mode[chan] == SVMI) || (m_mode[chan] == DISABLED) ) {
 		float val = m_signals[chan][0].get_sample();
 		val = constrain(val, 0, 5.0);
 		v = 65535*val/5.0;
@@ -263,7 +263,12 @@ void M1000_Device::set_mode(unsigned chan, unsigned mode) {
 	if (chan < 2) {
 		m_mode[chan] = mode;
 	}
+    if (chan == 0) {
+	libusb_control_transfer(m_usb, 0x40, 0x53, chan, 0, 0, 0, 100);
+    }
+    else {
 	libusb_control_transfer(m_usb, 0x40, 0x53, chan, mode, 0, 0, 100);
+    }
 	// std::cerr << "sm (" << chan << "," << mode << ")" << std::endl;
 }
 
