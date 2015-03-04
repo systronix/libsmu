@@ -164,7 +164,7 @@ void M1000_Device::configure(uint64_t rate) {
 // encode output samples
 inline uint16_t M1000_Device::encode_out(int chan) {
 	int v = 0;
-	if ( (m_mode[chan] == SVMI) || (m_mode[chan] == DISABLED) ) {
+	if (m_mode[chan] == SVMI) {
 		float val = m_signals[chan][0].get_sample();
 		val = constrain(val, 0, 5.0);
 		v = 65535*val/5.0;
@@ -172,6 +172,9 @@ inline uint16_t M1000_Device::encode_out(int chan) {
 		float val = m_signals[chan][1].get_sample();
 		val = constrain(val, -current_limit, current_limit);
 		v = 65536*(2.5 * 4./5. + 5.*.2*20.*0.5*val)/5.0;
+	}
+	else if (m_mode[chan] == DISABLED) {
+		v = 0;
 	}
 	if (v > 65535) v = 65535;
 	if (v < 0) v = 0;
