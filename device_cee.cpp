@@ -53,69 +53,39 @@ static const sl_signal_info cee_signal_info[2] = {
 inline int16_t signextend12(uint16_t v) {
 	return (v>((1<<11)-1))?(v - (1<<12)):v;
 }
-
-struct IN_sample {
-	uint8_t avl, ail, aih_avh, bvl, bil, bih_bvh;
-
-	int16_t av() { return signextend12((aih_avh&0x0f)<<8) | avl; }
-	int16_t bv() { return signextend12((bih_bvh&0x0f)<<8) | bvl; }
-	int16_t ai() { return signextend12((aih_avh&0xf0)<<4) | ail; }
-	int16_t bi() { return signextend12((bih_bvh&0xf0)<<4) | bil; }
-} __attribute__((packed));
-
 #define IN_SAMPLES_PER_PACKET 10
 #define FLAG_PACKET_DROPPED (1<<0)
-
-typedef struct IN_packet {
-	uint8_t mode_a;
-	uint8_t mode_b;
-	uint8_t flags;
-	uint8_t mode_seq;
-	IN_sample data[10];
-} __attribute__((packed)) IN_packet;
-
 #define OUT_SAMPLES_PER_PACKET 10
-struct OUT_sample {
-	uint8_t al, bl, bh_ah;
-	void pack(uint16_t a, uint16_t b) {
-		al = a & 0xff;
-		bl = b & 0xff;
-		bh_ah = ((b>>4)&0xf0) |	(a>>8);
-	}
-} __attribute__((packed));
-
-typedef struct OUT_packet {
-	uint8_t mode_a;
-	uint8_t mode_b;
-	OUT_sample data[10];
-} __attribute__((packed)) OUT_packet;
+#define IN_CT 64
+#define OUT_CT 32
 
 #define EEPROM_VALID_MAGIC 0x90e26cee
 #define EEPROM_FLAG_USB_POWER (1<<0)
 
-typedef struct CEE_version_descriptor {
-	uint8_t version_major;
-	uint8_t version_minor;
-	uint8_t flags;
-	uint8_t per_ns;
-	uint8_t min_per;
-} __attribute__((packed)) CEE_version_descriptor;
+enum CEE_version_descriptor_fields {
+	VERSION_MAJOR = 0,
+	VERSION_MINOR,
+	FLAGS,
+	PER_NS,
+	MIN_PER
+};
 
 CEE_Device::CEE_Device(Session* s, libusb_device* device):
-	Device(s, device),
-	m_signals {
-		{Signal(&cee_signal_info[0]), Signal(&cee_signal_info[1])},
-		{Signal(&cee_signal_info[0]), Signal(&cee_signal_info[1])},
-	},
-	m_mode{0,0}
-{	}
+Device(s, device)
+{
+	m_signals[0][0] = new Signal(&cee_signal_info[0]);
+	m_signals[0][1] = new Signal(&cee_signal_info[1]);
+	m_signals[1][0] = new Signal(&cee_signal_info[0]);
+	m_signals[1][1] = new Signal(&cee_signal_info[1]);
+	m_mode[0] = DISABLED;
+	m_mode[1] = DISABLED;
+}
 
 CEE_Device::~CEE_Device() {}
 
 int CEE_Device::get_default_rate() {
 	return 80000;
 }
-
 
 int CEE_Device::init() {
 	int r = Device::init();
@@ -132,7 +102,7 @@ int CEE_Device::init() {
 		m_fw_version = std::string(buf, strnlen(buf, r));
 	}
 
-	CEE_version_descriptor version_info;
+	uint8_t version_info[6];
 	bool have_version_info = 0;
 
 	if (m_fw_version >= "1.2") {
@@ -146,9 +116,9 @@ int CEE_Device::init() {
 	}
 
 	if (have_version_info) {
-		m_min_per = version_info.min_per;
-		if (version_info.per_ns != 250) {
-			std::cerr << "    Error: alternate timer clock " << version_info.per_ns << " is not supported in this release." << std::endl;
+		m_min_per = version_info[MIN_PER];
+		if (version_info[PER_NS] != 250) {
+			std::cerr << "    Error: alternate timer clock " << version_info[MIN_PER] << " is not supported in this release." << std::endl;
 		}
 
 	} else {
@@ -296,15 +266,15 @@ void CEE_Device::out_completion(libusb_transfer* t) {
 
 void CEE_Device::configure(uint64_t rate) {
 	double sampleTime = 1.0/rate;
-	m_xmega_per = round(sampleTime * (double) CEE_timer_clock);
+	m_xmega_per = (int)(sampleTime * (double)CEE_timer_clock + 0.5);
 	if (m_xmega_per < m_min_per) m_xmega_per = m_min_per;
 	sampleTime = m_xmega_per / (double) CEE_timer_clock; // convert back to get the actual sample time;
 
 	unsigned transfers = 4;
 	m_packets_per_transfer = ceil(BUFFER_TIME / (sampleTime * 10) / transfers);
 
-	m_in_transfers.alloc( transfers, m_usb, EP_IN,  LIBUSB_TRANSFER_TYPE_BULK, m_packets_per_transfer*sizeof(IN_packet),  1000, cee_in_completion,  this);
-	m_out_transfers.alloc(transfers, m_usb, EP_OUT, LIBUSB_TRANSFER_TYPE_BULK, m_packets_per_transfer*sizeof(OUT_packet), 1000, cee_out_completion, this);
+	m_in_transfers.alloc( transfers, m_usb, EP_IN,  LIBUSB_TRANSFER_TYPE_BULK, m_packets_per_transfer*IN_CT,  1000, cee_in_completion,  this);
+	m_out_transfers.alloc(transfers, m_usb, EP_OUT, LIBUSB_TRANSFER_TYPE_BULK, m_packets_per_transfer*OUT_CT, 1000, cee_out_completion, this);
 
 	m_in_transfers.num_active = m_out_transfers.num_active = 0;
 
@@ -314,11 +284,11 @@ void CEE_Device::configure(uint64_t rate) {
 inline uint16_t CEE_Device::encode_out(int chan, uint32_t igain) {
 	int v = 0;
 	if (m_mode[chan] == SVMI) {
-		float val = m_signals[chan][0].get_sample();
+		float val = m_signals[chan][0]->get_sample();
 		val = constrain(val, 0, 5.0);
 		v = 4095*val/5.0;
 	} else if (m_mode[chan] == SIMV) {
-		float val = m_signals[chan][1].get_sample();
+		float val = m_signals[chan][1]->get_sample();
 		val = constrain(val, m_current_limit / -1000.0, m_current_limit / 1000.0);
 		v = 4095*(1.25+(igain/CEE_current_gain_scale)*val)/2.5;
 	}
@@ -332,16 +302,17 @@ bool CEE_Device::submit_out_transfer(libusb_transfer* t) {
 		//std::cerr << "submit_out_transfer " << m_out_sampleno << std::endl;
 
 		for (unsigned p=0; p<m_packets_per_transfer; p++) {
-			OUT_packet *pkt = &((OUT_packet *)t->buffer)[p];
-			pkt->mode_a = m_mode[0];
-			pkt->mode_b = m_mode[1];
+			uint8_t* OUT_packet = (uint8_t *)(&(t->buffer[p*OUT_CT]));
+			OUT_packet[0] = m_mode[0];
+			OUT_packet[1] = m_mode[1];
 
 			for (unsigned i=0; i<OUT_SAMPLES_PER_PACKET; i++) {
-				pkt->data[i].pack(
-					encode_out(0, m_cal.current_gain_a),
-					encode_out(1, m_cal.current_gain_b)
-				);
-				m_out_sampleno++;
+				uint16_t a = encode_out(0, m_cal.current_gain_a);
+				uint16_t b = encode_out(0, m_cal.current_gain_b);
+                OUT_packet[2+i*3]= a & 0xff;
+                OUT_packet[2+i*3+1] = b & 0xff;
+                OUT_packet[2+i*3+2] = ((b>>4)&0xf0) | (a>>8);
+                m_out_sampleno++;
 			}
 		}
 
@@ -376,25 +347,30 @@ void CEE_Device::handle_in_transfer(libusb_transfer* t) {
 	if (rawMode) v_factor = i_factor_a = i_factor_b = 1;
 
 	for (unsigned p=0; p<m_packets_per_transfer; p++) {
-		IN_packet *pkt = &((IN_packet*)t->buffer)[p];
+		uint8_t* IN_packet = (uint8_t *)(&(t->buffer[p*IN_CT]));
 
-		if ((pkt->flags & FLAG_PACKET_DROPPED) && m_in_sampleno != 0) {
+		if ((IN_packet[2] & FLAG_PACKET_DROPPED) && (m_in_sampleno != 0)) {
 			std::cerr << "Warning: dropped packet" << std::endl;
+			cerr << IN_packet << endl;
 		}
-
 		for (int i=0; i<IN_SAMPLES_PER_PACKET; i++) {
-			m_signals[0][0].put_sample((m_cal.offset_a_v + pkt->data[i].av())*v_factor);
+			uint8_t* IN_sample = (uint8_t*)(&(IN_packet[4+i*6]));
+			int16_t av = signextend12((IN_sample[2]&0x0f)<<8 | IN_sample[0]);
+			int16_t bv = signextend12((IN_sample[5]&0x0f)<<8 | IN_sample[3]);
+			int16_t ai = signextend12((IN_sample[2]&0xf0)<<4 | IN_sample[1]);
+			int16_t bi = signextend12((IN_sample[5]&0xf0)<<4 | IN_sample[4]);
+			m_signals[0][0]->put_sample((m_cal.offset_a_v + av)*v_factor);
 			if (m_mode[0] != DISABLED) {
-				m_signals[0][1].put_sample((m_cal.offset_a_i + pkt->data[i].ai())*i_factor_a);
+				m_signals[0][1]->put_sample((m_cal.offset_a_i + ai)*i_factor_a);
 			} else {
-				m_signals[0][1].put_sample(0);
+				m_signals[0][1]->put_sample(0);
 			}
 
-			m_signals[1][0].put_sample((m_cal.offset_b_v + pkt->data[i].bv())*v_factor);
+			m_signals[1][0]->put_sample((m_cal.offset_b_v + bv)*v_factor);
 			if (m_mode[1] != DISABLED) {
-				m_signals[1][1].put_sample((m_cal.offset_b_i + pkt->data[i].bi())*i_factor_b);
+				m_signals[1][1]->put_sample((m_cal.offset_b_i + bi)*i_factor_b);
 			} else {
-				m_signals[1][1].put_sample(0);
+				m_signals[1][1]->put_sample(0);
 			}
 			m_in_sampleno++;
 		}
@@ -417,7 +393,7 @@ const sl_channel_info* CEE_Device::channel_info(unsigned channel) const {
 
 Signal* CEE_Device::signal(unsigned channel, unsigned signal) {
 	if (channel < 2 && signal < 2) {
-		return &m_signals[channel][signal];
+		return m_signals[channel][signal];
 	} else {
 		return NULL;
 	}

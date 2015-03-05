@@ -54,13 +54,15 @@ static const sl_signal_info m1000_signal_info[2] = {
 const float current_limit = 0.2;
 
 M1000_Device::M1000_Device(Session* s, libusb_device* device):
-	Device(s, device),
-	m_signals {
-		{Signal(&m1000_signal_info[0]), Signal(&m1000_signal_info[1])},
-		{Signal(&m1000_signal_info[0]), Signal(&m1000_signal_info[1])},
-	},
-	m_mode{0,0}
-{	}
+Device(s, device)
+{
+	m_signals[0][0] = new Signal(&m1000_signal_info[0]);
+	m_signals[0][1] = new Signal(&m1000_signal_info[1]);
+	m_signals[1][0] = new Signal(&m1000_signal_info[0]);
+	m_signals[1][1] = new Signal(&m1000_signal_info[1]);
+	m_mode[0] = 0;
+	m_mode[1] = 0;
+}
 
 M1000_Device::~M1000_Device() {}
 
@@ -165,11 +167,11 @@ void M1000_Device::configure(uint64_t rate) {
 inline uint16_t M1000_Device::encode_out(int chan) {
 	int v = 0;
 	if (m_mode[chan] == SVMI) {
-		float val = m_signals[chan][0].get_sample();
+		float val = m_signals[chan][0]->get_sample();
 		val = constrain(val, 0, 5.0);
 		v = 65535*val/5.0;
 	} else if (m_mode[chan] == SIMV) {
-		float val = m_signals[chan][1].get_sample();
+		float val = m_signals[chan][1]->get_sample();
 		val = constrain(val, -current_limit, current_limit);
 		v = 65536*(2.5 * 4./5. + 5.*.2*20.*0.5*val)/5.0;
 	} else if (m_mode[chan] == DISABLED) {
@@ -228,10 +230,10 @@ void M1000_Device::handle_in_transfer(libusb_transfer* t) {
 		uint8_t* buf = (uint8_t*) (t->buffer + p*in_packet_size);
 
 		for (unsigned i=(m_in_sampleno==0)?2:0; i<chunk_size; i++) {
-			m_signals[0][0].put_sample( (buf[(i+chunk_size*0)*2] << 8 | buf[(i+chunk_size*0)*2+1]) / 65535.0 * 5.0);
-			m_signals[0][1].put_sample(((buf[(i+chunk_size*1)*2] << 8 | buf[(i+chunk_size*1)*2+1]) / 65535.0 - 0.61) * 0.4 + 0.048);
-			m_signals[1][0].put_sample( (buf[(i+chunk_size*2)*2] << 8 | buf[(i+chunk_size*2)*2+1]) / 65535.0 * 5.0);
-			m_signals[1][1].put_sample(((buf[(i+chunk_size*3)*2] << 8 | buf[(i+chunk_size*3)*2+1]) / 65535.0 - 0.61) * 0.4 + 0.048);
+			m_signals[0][0]->put_sample( (buf[(i+chunk_size*0)*2] << 8 | buf[(i+chunk_size*0)*2+1]) / 65535.0 * 5.0);
+			m_signals[0][1]->put_sample(((buf[(i+chunk_size*1)*2] << 8 | buf[(i+chunk_size*1)*2+1]) / 65535.0 - 0.61) * 0.4 + 0.048);
+			m_signals[1][0]->put_sample( (buf[(i+chunk_size*2)*2] << 8 | buf[(i+chunk_size*2)*2+1]) / 65535.0 * 5.0);
+			m_signals[1][1]->put_sample(((buf[(i+chunk_size*3)*2] << 8 | buf[(i+chunk_size*3)*2+1]) / 65535.0 - 0.61) * 0.4 + 0.048);
 			m_in_sampleno++;
 		}
 	}
@@ -254,7 +256,7 @@ const sl_channel_info* M1000_Device::channel_info(unsigned channel) const {
 
 Signal* M1000_Device::signal(unsigned channel, unsigned signal) {
 	if (channel < 2 && signal < 2) {
-		return &m_signals[channel][signal];
+		return m_signals[channel][signal];
 	} else {
 		return NULL;
 	}
