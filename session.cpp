@@ -208,7 +208,14 @@ void Session::end() {
 	// completion lock
 	std::unique_lock<std::mutex> lk(m_lock);
 	// wait on m_completion, return m_active_devices compared with 0
-	m_completion.wait(lk, [&]{ return m_active_devices == 0; });
+	auto now = std::chrono::system_clock::now();
+	auto res = m_completion.wait_until(lk, now + std::chrono::milliseconds(100), [&]{ return m_active_devices == 0; });
+	if ( res )
+		cerr << "m_active_devices = 0" << endl;
+	else {
+		cerr << "timed out" << endl;
+		//m_active_devices = 0;
+	}
 	for (auto i: m_devices) {
 		i->off();
 	}
@@ -250,6 +257,8 @@ void Session::completion() {
 	// On USB thread
 	std::lock_guard<std::mutex> lock(m_lock);
 	m_active_devices -= 1;
+	if (m_active_devices < 0)
+		m_active_devices = 0;
 	if (m_active_devices == 0) {
 		if (m_completion_callback) {
 			m_completion_callback(m_cancellation != 0);
