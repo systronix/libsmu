@@ -4,7 +4,7 @@
 //   Ian Daniher <itdaniher@gmail.com>
 
 #include "device_cee.hpp"
-#include <libusb.h>
+#include "libusb.h"
 #include <iostream>
 #include <cstring>
 #include <cmath>

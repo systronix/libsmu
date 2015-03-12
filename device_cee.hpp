@@ -60,7 +60,7 @@ protected:
 		int16_t dac200_a, dac200_b, dac400_a, dac400_b;
 		uint32_t current_gain_a, current_gain_b;
 		uint8_t flags; // bit 0: USB powered
-	} __attribute__((packed));
+	}; //__attribute__((packed));
 
 	void read_calibration();
 	EEPROM_cal m_cal;

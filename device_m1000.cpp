@@ -4,7 +4,7 @@
 //   Ian Daniher <itdaniher@gmail.com>
 
 #include "device_m1000.hpp"
-#include <libusb.h>
+#include "libusb.h"
 #include <iostream>
 #include <cstring>
 #include <cmath>
@@ -148,7 +148,8 @@ void M1000_Device::out_completion(libusb_transfer *t) {
 // calculate values for sampling period for SAM3U timer
 void M1000_Device::configure(uint64_t rate) {
 	double sample_time = 1.0/rate;
-	m_sam_per = round(sample_time * (double) M1K_timer_clock) / 2;
+	//m_sam_per = round(sample_time * (double) M1K_timer_clock) / 2;
+	m_sam_per = (int)((sample_time * (double)M1K_timer_clock) + 0.5) / 2;
 	if (m_sam_per < m_min_per) m_sam_per = m_min_per;
 	sample_time = m_sam_per / (double) M1K_timer_clock; // convert back to get the actual sample time;
 

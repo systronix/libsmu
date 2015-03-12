@@ -5,7 +5,7 @@
 
 #include "libsmu.hpp"
 #include <iostream>
-#include <libusb.h>
+#include "libusb.h"
 #include "device_cee.hpp"
 #include "device_m1000.hpp"
 
@@ -259,7 +259,7 @@ void Session::completion() {
 }
 
 void Session::progress() {
-	sample_t min_progress = std::numeric_limits<uint64_t>::max();
+	sample_t min_progress =  ULLONG_MAX;//std::numeric_limits<uint64_t>::max();
 	for (auto i: m_devices) {
 		if (i->m_in_sampleno < min_progress) {
 			min_progress = i->m_in_sampleno;
@@ -274,7 +274,7 @@ void Session::progress() {
 	}
 }
 
-Device::Device(Session* s, libusb_device* d): m_session(s), m_device(d) {
+Device::Device(Session* s, libusb_device* d): m_session(s), m_device(d), m_usb(NULL) {
 	libusb_ref_device(m_device);
 }
 
