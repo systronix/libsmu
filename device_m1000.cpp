@@ -111,6 +111,7 @@ void M1000_Device::in_completion(libusb_transfer *t) {
 	}
 
 	if (m_out_transfers.num_active == 0 && m_in_transfers.num_active == 0) {
+		cout << "last IN trans completing" << endl;
 		m_session->completion();
 	}
 }
@@ -139,6 +140,7 @@ void M1000_Device::out_completion(libusb_transfer *t) {
 	}
 
 	if (m_out_transfers.num_active == 0 && m_in_transfers.num_active == 0) {
+		cout << "last OUT trans completing" << endl;
 		m_session->completion();
 	}
 }

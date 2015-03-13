@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <vector>
+#include <iostream>
 
 inline static float constrain(float val, float lo, float hi){
 	if (val > hi) val = hi;
@@ -47,7 +48,7 @@ struct Transfers {
 
 	void cancel() {
 		for (auto i: m_transfers) {
-			libusb_cancel_transfer(i);
+			std::cout << libusb_error_name(libusb_cancel_transfer(i)) << std::endl;
 		}
 	}
 
